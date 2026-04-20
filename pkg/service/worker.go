@@ -251,7 +251,7 @@ func (w *BundleWorker) Execute(ctx context.Context) time.Time {
 		reader := bytes.NewReader(buffer.Bytes())
 		fmt.Println("before call to upload")
 		if err := w.storage.Upload(ctx, reader, w.bundleConfig.Name, resolvedRevision, reader.Size()); err != nil {
-			fmt.Println("failed to upload bundle: " + w.bundleConfig.Name + "\n")
+			fmt.Println("failed to upload bundle: " + w.bundleConfig.Name + " err: " + fmt.Sprintf("%v", err) + "\n")
 			if errors.Is(err, ext_os.ErrNotModified) {
 				fmt.Println("bundle not modified: " + w.bundleConfig.Name + "\n")
 				w.log.Debugf("Bundle %q built, not modified.", w.bundleConfig.Name)

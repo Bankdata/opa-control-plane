@@ -268,6 +268,7 @@ func (s *AmazonS3) check(ctx context.Context, body io.Reader) ([]byte, bool, err
 		Bucket: aws.String(s.bucket),
 		Key:    aws.String(s.key),
 	})
+	fmt.Println("finished checking existing object in S3 with bucket: " + s.bucket + " and key: " + s.key + "\n")
 	if err != nil {
 		fmt.Print("error from HeadObject: " + fmt.Sprintf("%v", err) + "\n")
 		var noKey *types.NoSuchKey

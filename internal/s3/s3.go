@@ -207,12 +207,14 @@ func (e *Error) Error() string {
 // Relying on object ETag is not if the object is encrypted with SSE-C or SSE-KMS, as the ETag will not be the MD5 hash of the object.
 // With (part) checksums, only parallellizable, less reliable checksums (CRCs) are supported.
 func (s *AmazonS3) Upload(ctx context.Context, body io.ReadSeeker, _ string, revision string, _ int64) error {
-
+	fmt.Println("Upload to AmazonS3")
 	digest, equal, err := s.check(ctx, body)
 	if err != nil {
+		fmt.Println("s.check failed with error: " + fmt.Sprintf("%v", err) + "\n")
 		return err
 	}
 	if equal {
+		fmt.Println("s.check found no changes, skipping upload\n")
 		return ext_os.ErrNotModified
 	}
 
@@ -227,13 +229,16 @@ func (s *AmazonS3) Upload(ctx context.Context, body io.ReadSeeker, _ string, rev
 	if revision != "" {
 		metadata["revision"] = revision
 	}
-
+	fmt.Println("before call to PutObject, for bucket: " + s.bucket + " and revision: " + revision + "\n")
 	_, err = s.client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket:   aws.String(s.bucket),
 		Key:      aws.String(s.key),
 		Body:     body,
 		Metadata: metadata,
 	})
+
+	fmt.Println("after call to PutObject, for bucket: " + s.bucket + " and revision: " + revision + "\n")
+	fmt.Println("error from PutObject: " + fmt.Sprintf("%v", err) + "\n")
 	return err
 }
 
@@ -258,11 +263,13 @@ func (s *AmazonS3) check(ctx context.Context, body io.Reader) ([]byte, bool, err
 
 	digest := d.Sum(nil)
 
+	fmt.Println("checking existing object in S3 with bucket: " + s.bucket + " and key: " + s.key + "\n")
 	output, err := s.client.HeadObject(ctx, &s3.HeadObjectInput{
 		Bucket: aws.String(s.bucket),
 		Key:    aws.String(s.key),
 	})
 	if err != nil {
+		fmt.Print("error from HeadObject: " + fmt.Sprintf("%v", err) + "\n")
 		var noKey *types.NoSuchKey
 		var notFound *types.NotFound
 		if errors.As(err, &noKey) || errors.As(err, &notFound) {
@@ -275,6 +282,7 @@ func (s *AmazonS3) check(ctx context.Context, body io.Reader) ([]byte, bool, err
 		return digest, false, nil
 	}
 
+	fmt.Print("existing object metadata: " + fmt.Sprintf("%v", output.Metadata) + "\n")
 	return digest, output.Metadata["sha256"] == hex.EncodeToString(digest), nil
 }
 

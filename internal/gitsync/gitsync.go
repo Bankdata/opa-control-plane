@@ -125,8 +125,9 @@ func (s *Synchronizer) WithSecretProvider(provider pkgsync.SecretProvider) *Sync
 // Returns metadata about the synchronized repository, including the current commit hash.
 func (s *Synchronizer) Execute(ctx context.Context) (map[string]any, error) {
 	startTime := time.Now()
-
+	fmt.Println("starting git synchronization for source: " + s.sourceName + "\n")
 	done, hash, err := s.execute(ctx)
+	fmt.Println("finished git synchronization for source: " + s.sourceName + "\n")
 	if err != nil {
 		metrics.GitSyncFailed(s.sourceName, s.config.Repo)
 		return nil, fmt.Errorf("source %q: git synchronizer: %v: %w", s.sourceName, s.config.Repo, err)
@@ -145,6 +146,7 @@ func (s *Synchronizer) SourceName() string {
 }
 
 func (s *Synchronizer) execute(ctx context.Context) (bool, string, error) {
+	fmt.Println("checking git repository for source: " + s.sourceName + "\n")
 	var fetched bool
 	if s.config.Commit == nil && s.config.Reference == nil {
 		return false, "", errors.New("either reference or commit must be set in git configuration")

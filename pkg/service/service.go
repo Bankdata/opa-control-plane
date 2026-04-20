@@ -326,7 +326,12 @@ func (s *Service) launchWorkers(ctx context.Context) {
 			s.log.Errorf("error listing bundles: %s", err.Error())
 			return
 		}
-		s.log.Debugf("launchWorkers(%s) for %d bundles", tenant, len(bundles))
+		s.log.Debugf("launchWorkers(%s) for %d bundles in pkg", tenant, len(bundles))
+
+		// Print elements in s.workers for debugging
+		for id := range s.workers {
+			fmt.Printf("existing worker: %s\n", id)
+		}
 
 		sourceDefs, _, err := s.database.ListSources(ctx, internalPrincipal, tenant, database.ListOptions{})
 		if err != nil {
@@ -354,11 +359,13 @@ func (s *Service) launchWorkers(ctx context.Context) {
 		// Remove any worker already shutdown from bookkeeping, as well as initiate shutdown for any bundle (worker) not in the current configuration.
 		for id, w := range s.workers {
 			if w.Done() {
+				fmt.Println("delete in pkg")
 				delete(s.workers, id)
 				continue
 			}
 
 			if _, ok := activeBundles[id]; !ok {
+				fmt.Println("UpdateConfig in pkg")
 				w.UpdateConfig(nil, nil, nil)
 			}
 		}
@@ -383,11 +390,14 @@ func (s *Service) launchWorkers(ctx context.Context) {
 
 		for _, b := range bundles {
 			bName := tenant + "_" + b.Name
+			fmt.Println("processing bundle in pkg: " + bName)
 			if w, ok := s.workers[bName]; ok {
+				fmt.Println("updateConfig in pkg in range")
 				w.UpdateConfig(b, sourceDefs, stacks)
 				continue
 			}
 
+			fmt.Println("restarting worker in pkg")
 			s.log.Debugf("(re)starting worker for bundle: %s (%s)", b.Name, tenant)
 			root := newSource(b.Name).AddRequirements(b.Requirements)
 

@@ -5,6 +5,7 @@ import (
 	"cmp"
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"time"
 
@@ -118,6 +119,7 @@ func (worker *BundleWorker) Done() bool {
 
 func (worker *BundleWorker) UpdateConfig(b *config.Bundle, sources []*config.Source, stacks []*config.Stack) {
 	if b == nil || !worker.bundleConfig.Equal(b) || !worker.sourceConfigs.Equal(sources) || !worker.stackConfigs.Equal(stacks) {
+		fmt.Println("config changed in worker")
 		worker.changeConfiguration()
 	}
 }
@@ -125,6 +127,7 @@ func (worker *BundleWorker) UpdateConfig(b *config.Bundle, sources []*config.Sou
 // Execute runs a bundle synchronization iteration: git sync, bundle construct
 // and then push bundles to object storage.
 func (w *BundleWorker) Execute(ctx context.Context) time.Time {
+	fmt.Print("execute worker for bundle: " + w.bundleConfig.Name + "\n")
 	startTime := time.Now() // Used for timing metric
 
 	defer w.bar.Add(1)
@@ -132,6 +135,7 @@ func (w *BundleWorker) Execute(ctx context.Context) time.Time {
 	// If a configuration change was requested, request the worker to be removed from the pool and signal this worker being done.
 
 	if w.configurationChanged() {
+		fmt.Println("configuration changed, stopping worker for bundle: " + w.bundleConfig.Name + "\n")
 		return w.die(ctx)
 	}
 
@@ -143,11 +147,14 @@ func (w *BundleWorker) Execute(ctx context.Context) time.Time {
 		}
 	}
 
+	fmt.Println("starting synchronization for bundle: " + w.bundleConfig.Name + "\n")
 	// Collect source metadata from synchronizers and structure by source type
 	// Note: Metadata fields to compute are configured at synchronizer construction time
 	sourceMetadata := make(map[string]map[string]any)
 	for _, ss := range w.synchronizers {
+		fmt.Println("synchronizing source: " + ss.sourceName + "\n")
 		metadata, err := ss.sync.Execute(ctx)
+		fmt.Println("finished synchronizing source: " + ss.sourceName + "\n")
 		if err != nil {
 			w.log.Warnf("failed to synchronize bundle %q: %v", w.bundleConfig.Name, err)
 			return w.report(ctx, BuildStateSyncFailed, startTime, err)
@@ -172,6 +179,7 @@ func (w *BundleWorker) Execute(ctx context.Context) time.Time {
 		}
 	}
 
+	fmt.Println("finished synchronization for bundle: " + w.bundleConfig.Name + "\n")
 	for _, src := range w.sources {
 		buf, err := src.Transform(ctx)
 		if buf != nil && buf.Len() > 0 {
@@ -185,9 +193,11 @@ func (w *BundleWorker) Execute(ctx context.Context) time.Time {
 
 	buffer := bytes.NewBuffer(nil)
 
+	fmt.Println("resolving bundle revision for bundle: " + w.bundleConfig.Name + "\n")
 	_, needsBundleHash, _ := extractRevisionRefs(w.bundleConfig.Revision)
 
 	var resolvedRevision string
+	fmt.Println("before b")
 	b := builder.New().
 		WithSources(w.sources).
 		WithExcluded(w.bundleConfig.ExcludedFiles).
@@ -213,8 +223,9 @@ func (w *BundleWorker) Execute(ctx context.Context) time.Time {
 	if w.bundleConfig.Options.Optimization != nil {
 		b = b.WithOptimizationLevel(w.bundleConfig.Options.Optimization.Level)
 	}
-
+	fmt.Print("start building bundle: " + w.bundleConfig.Name + "\n")
 	if err := b.Build(ctx); err != nil {
+		fmt.Println("failed to build bundle: " + w.bundleConfig.Name + "\n")
 		w.log.Warnf("failed to build a bundle %q: %v", w.bundleConfig.Name, err)
 
 		if b.Revision() != "" {
@@ -226,6 +237,8 @@ func (w *BundleWorker) Execute(ctx context.Context) time.Time {
 		return w.report(ctx, BuildStateBuildFailed, startTime, err)
 	}
 
+	fmt.Println("finished building bundle: " + w.bundleConfig.Name + "\n")
+
 	if b.Revision() != "" {
 		_, err := w.database.UpsertBundleStatus(ctx, w.tenant, w.bundleConfig.Name, b.Revision(), BuildPhaseBuild.String(), BuildStateSuccess.String(), "")
 		if err != nil {
@@ -234,12 +247,17 @@ func (w *BundleWorker) Execute(ctx context.Context) time.Time {
 	}
 
 	if w.storage != nil {
+		fmt.Println("uploading bundle: " + w.bundleConfig.Name + "\n")
 		reader := bytes.NewReader(buffer.Bytes())
+		fmt.Println("before call to upload")
 		if err := w.storage.Upload(ctx, reader, w.bundleConfig.Name, resolvedRevision, reader.Size()); err != nil {
+			fmt.Println("failed to upload bundle: " + w.bundleConfig.Name + "\n")
 			if errors.Is(err, ext_os.ErrNotModified) {
+				fmt.Println("bundle not modified: " + w.bundleConfig.Name + "\n")
 				w.log.Debugf("Bundle %q built, not modified.", w.bundleConfig.Name)
 				return w.report(ctx, BuildStateSuccess, startTime, nil)
 			}
+			fmt.Println("failed to upload bundle: " + w.bundleConfig.Name + "\n")
 			w.log.Warnf("failed to upload bundle %q: %v", w.bundleConfig.Name, err)
 
 			if b.Revision() != "" {

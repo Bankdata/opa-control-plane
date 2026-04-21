@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 
 	"cloud.google.com/go/storage"
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
@@ -264,20 +265,27 @@ func (s *AmazonS3) check(ctx context.Context, body io.Reader) ([]byte, bool, err
 	digest := d.Sum(nil)
 
 	fmt.Println("checking existing object in S3 with bucket: " + s.bucket + " and key: " + s.key + "\n")
-	output, err := s.client.HeadObject(ctx, &s3.HeadObjectInput{
+	headCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	output, err := s.client.HeadObject(headCtx, &s3.HeadObjectInput{
 		Bucket: aws.String(s.bucket),
 		Key:    aws.String(s.key),
 	})
 	fmt.Println("finished checking existing object in S3 with bucket: " + s.bucket + " and key: " + s.key + "\n")
 	if err != nil {
-		fmt.Print("error from HeadObject: " + fmt.Sprintf("%v", err) + "\n")
-		var noKey *types.NoSuchKey
-		var notFound *types.NotFound
-		if errors.As(err, &noKey) || errors.As(err, &notFound) {
-			return digest, false, nil
-		}
+		if errors.Is(err, context.DeadlineExceeded) {
+			fmt.Println("HeadObject timed out\n")
+			return nil, false, err
+		} else {
+			fmt.Print("error from HeadObject: " + fmt.Sprintf("%v", err) + "\n")
+			var noKey *types.NoSuchKey
+			var notFound *types.NotFound
+			if errors.As(err, &noKey) || errors.As(err, &notFound) {
+				return digest, false, nil
+			}
 
-		return nil, false, err
+			return nil, false, err
+		}
 	}
 	if output.Metadata == nil {
 		return digest, false, nil

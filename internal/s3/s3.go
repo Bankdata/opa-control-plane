@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 
@@ -29,6 +30,7 @@ var (
 	_ ext_os.ObjectStorage = (*AmazonS3)(nil)
 	_ ext_os.ObjectStorage = (*GCPCloudStorage)(nil)
 	_ ext_os.ObjectStorage = (*AzureBlobStorage)(nil)
+	_ ext_os.ObjectStorage = (*JFrogArtifactory)(nil)
 	_ ext_os.ObjectStorage = (*FileSystemStorage)(nil)
 )
 
@@ -50,6 +52,13 @@ type (
 		container string
 		path      string
 		client    *azblob.Client
+	}
+
+	JFrogArtifactory struct {
+		url        string
+		repository string
+		path       string
+		client     *http.Client
 	}
 
 	FileSystemStorage struct {
@@ -184,6 +193,29 @@ func New(ctx context.Context, c config.ObjectStorage) (ext_os.ObjectStorage, err
 		}
 
 		return &AzureBlobStorage{container: c.AzureBlobStorage.Container, path: c.AzureBlobStorage.Path, client: client}, nil
+	case c.JFrogArtifactory != nil:
+		var client *http.Client
+
+		if c.JFrogArtifactory.Credentials == nil {
+			client = &http.Client{}
+		} else {
+			value, err := c.JFrogArtifactory.Credentials.Resolve(ctx)
+			if err != nil {
+				return nil, err
+			}
+
+			auth, ok := value.(config.SecretJFrog)
+			if !ok {
+				return nil, errors.New("invalid JFrog secret type")
+			}
+
+			client, err = auth.Client(ctx)
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		return &JFrogArtifactory{url: c.JFrogArtifactory.URL, repository: c.JFrogArtifactory.Repository, path: c.JFrogArtifactory.Path, client: client}, nil
 	case c.FileSystemStorage != nil:
 		return &FileSystemStorage{path: c.FileSystemStorage.Path}, nil
 	default:
@@ -345,6 +377,103 @@ func (s *AzureBlobStorage) Upload(ctx context.Context, body io.ReadSeeker, opts 
 
 func (*AzureBlobStorage) Download(context.Context) (io.Reader, error) {
 	return nil, errors.New("not implemented")
+}
+
+func (j *JFrogArtifactory) Upload(ctx context.Context, body io.ReadSeeker, opts ext_os.UploadOptions) error {
+	digest, equal, err := j.check(ctx, body)
+	if err != nil {
+		return err
+	}
+	if equal {
+		return ext_os.ErrNotModified
+	}
+
+	_, err = body.Seek(0, io.SeekStart)
+	if err != nil {
+		return err
+	}
+
+	url := fmt.Sprintf("%s/%s/%s", j.url, j.repository, j.path)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, body)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("X-Checksum-SHA256", hex.EncodeToString(digest))
+	if opts.Revision != "" {
+		req.Header.Set("X-Artifactory-Meta-Revision", opts.Revision)
+	}
+
+	resp, err := j.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to upload to JFrog: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("jfrog upload failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	return nil
+}
+
+func (j *JFrogArtifactory) Download(ctx context.Context) (io.Reader, error) {
+	url := fmt.Sprintf("%s/%s/%s", j.url, j.repository, j.path)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := j.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to download from JFrog: %w", err)
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("jfrog download failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	return resp.Body, nil
+}
+
+func (j *JFrogArtifactory) check(ctx context.Context, body io.Reader) ([]byte, bool, error) {
+	d := sha256.New()
+	_, err := io.Copy(d, body)
+	if err != nil {
+		return nil, false, err
+	}
+
+	digest := d.Sum(nil)
+
+	url := fmt.Sprintf("%s/%s/%s", j.url, j.repository, j.path)
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, url, nil)
+	if err != nil {
+		return nil, false, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := j.client.Do(req)
+	if err != nil {
+		return nil, false, fmt.Errorf("failed to check artifact: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return digest, false, nil
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, false, fmt.Errorf("jfrog head request failed with status %d", resp.StatusCode)
+	}
+
+	remoteChecksum := resp.Header.Get("X-Checksum-SHA256")
+	if remoteChecksum == "" {
+		return digest, false, nil
+	}
+
+	return digest, remoteChecksum == hex.EncodeToString(digest), nil
 }
 
 func (s *FileSystemStorage) Upload(ctx context.Context, body io.ReadSeeker, _ ext_os.UploadOptions) error {

@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"io"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -335,6 +336,141 @@ func TestGCSNotModified(t *testing.T) {
 	// Upload with different content should succeed.
 	r2 := bytes.NewReader([]byte("different content"))
 	if err := gcsStorage.Upload(t.Context(), r2, ext_os.UploadOptions{}); err != nil {
+		t.Fatalf("third upload: %v", err)
+	}
+}
+
+func TestJFrogArtifactory(t *testing.T) {
+	mux := http.NewServeMux()
+	uploads := make(map[string][]byte)
+	var uploadedChecksum string
+
+	mux.HandleFunc("PUT /test-repo/test-bundle", func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		uploadedChecksum = r.Header.Get("X-Checksum-SHA256")
+		uploads["test-bundle"] = body
+		w.WriteHeader(http.StatusCreated)
+	})
+
+	mux.HandleFunc("HEAD /test-repo/test-bundle", func(w http.ResponseWriter, r *http.Request) {
+		if content, ok := uploads["test-bundle"]; ok {
+			digest := sha256.Sum256(content)
+			w.Header.Set("X-Checksum-SHA256", hex.EncodeToString(digest[:]))
+			w.WriteHeader(http.StatusOK)
+		} else {
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+
+	mux.HandleFunc("GET /test-repo/test-bundle", func(w http.ResponseWriter, r *http.Request) {
+		if content, ok := uploads["test-bundle"]; ok {
+			w.Header().Set("Content-Type", "application/octet-stream")
+			w.Write(content)
+		} else {
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	ctx := context.Background()
+
+	cfg := config.ObjectStorage{
+		JFrogArtifactory: &config.JFrogArtifactory{
+			URL:        ts.URL,
+			Repository: "test-repo",
+			Path:       "test-bundle",
+		},
+	}
+
+	storage, err := New(ctx, cfg)
+	if err != nil {
+		t.Fatalf("failed to create storage: %v", err)
+	}
+
+	bundleContent := []byte("test bundle content")
+	bundle := bytes.NewReader(bundleContent)
+
+	err = storage.Upload(ctx, bundle, ext_os.UploadOptions{})
+	if err != nil {
+		t.Fatalf("expected no error while uploading bundle: %v", err)
+	}
+
+	expectedDigest := sha256.Sum256(bundleContent)
+	if uploadedChecksum != hex.EncodeToString(expectedDigest[:]) {
+		t.Fatalf("expected checksum %s, got %s", hex.EncodeToString(expectedDigest[:]), uploadedChecksum)
+	}
+
+	reader, err := storage.Download(ctx)
+	if err != nil {
+		t.Fatalf("expected no error while downloading bundle: %v", err)
+	}
+
+	downloaded, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("expected no error while reading downloaded bundle: %v", err)
+	}
+
+	if !bytes.Equal(downloaded, bundleContent) {
+		t.Fatalf("expected downloaded content to be %s, got %s", bundleContent, downloaded)
+	}
+}
+
+func TestJFrogArtifactoryNotModified(t *testing.T) {
+	mux := http.NewServeMux()
+	uploads := make(map[string][]byte)
+
+	mux.HandleFunc("PUT /test-repo/test-bundle", func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		uploads["test-bundle"] = body
+		w.WriteHeader(http.StatusCreated)
+	})
+
+	mux.HandleFunc("HEAD /test-repo/test-bundle", func(w http.ResponseWriter, r *http.Request) {
+		if content, ok := uploads["test-bundle"]; ok {
+			digest := sha256.Sum256(content)
+			w.Header().Set("X-Checksum-SHA256", hex.EncodeToString(digest[:]))
+			w.WriteHeader(http.StatusOK)
+		} else {
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	ctx := context.Background()
+
+	storage, err := New(ctx, config.ObjectStorage{
+		JFrogArtifactory: &config.JFrogArtifactory{
+			URL:        ts.URL,
+			Repository: "test-repo",
+			Path:       "test-bundle",
+		},
+	})
+	if err != nil {
+		t.Fatalf("failed to create storage: %v", err)
+	}
+
+	content := []byte("same content")
+
+	r := bytes.NewReader(content)
+	if err := storage.Upload(ctx, r, ext_os.UploadOptions{}); err != nil {
+		t.Fatalf("first upload: %v", err)
+	}
+
+	r = bytes.NewReader(content)
+	if err := storage.Upload(ctx, r, ext_os.UploadOptions{}); !errors.Is(err, ext_os.ErrNotModified) {
+		t.Fatalf("second upload: got %v, want ErrNotModified", err)
+	}
+
+	r2 := bytes.NewReader([]byte("different content"))
+	if err := storage.Upload(ctx, r2, ext_os.UploadOptions{}); err != nil {
 		t.Fatalf("third upload: %v", err)
 	}
 }

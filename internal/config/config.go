@@ -35,6 +35,7 @@ type (
 	AmazonS3          = extconfig.AmazonS3
 	GCPCloudStorage   = extconfig.GCPCloudStorage
 	AzureBlobStorage  = extconfig.AzureBlobStorage
+	JFrogArtifactory  = extconfig.JFrogArtifactory
 	FileSystemStorage = extconfig.FileSystemStorage
 	StringSet         = extconfig.StringSet
 	Requirements      = extconfig.Requirements
@@ -166,6 +167,9 @@ func (*Root) unmarshal(raw *Root) error {
 		}
 		if raw.Bundles[name].ObjectStorage.GCPCloudStorage != nil && raw.Bundles[name].ObjectStorage.GCPCloudStorage.Credentials != nil {
 			wireSecret(raw.Bundles[name].ObjectStorage.GCPCloudStorage.Credentials, raw.Secrets[raw.Bundles[name].ObjectStorage.GCPCloudStorage.Credentials.Name])
+		}
+		if raw.Bundles[name].ObjectStorage.JFrogArtifactory != nil && raw.Bundles[name].ObjectStorage.JFrogArtifactory.Credentials != nil {
+			wireSecret(raw.Bundles[name].ObjectStorage.JFrogArtifactory.Credentials, raw.Secrets[raw.Bundles[name].ObjectStorage.JFrogArtifactory.Credentials.Name])
 		}
 	}
 

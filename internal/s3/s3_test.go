@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"io"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -338,3 +339,4 @@ func TestGCSNotModified(t *testing.T) {
 		t.Fatalf("third upload: %v", err)
 	}
 }
+

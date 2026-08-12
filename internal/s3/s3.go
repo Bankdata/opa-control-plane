@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 
@@ -29,6 +30,7 @@ var (
 	_ ext_os.ObjectStorage = (*AmazonS3)(nil)
 	_ ext_os.ObjectStorage = (*GCPCloudStorage)(nil)
 	_ ext_os.ObjectStorage = (*AzureBlobStorage)(nil)
+	_ ext_os.ObjectStorage = (*JFrogArtifactory)(nil)
 	_ ext_os.ObjectStorage = (*FileSystemStorage)(nil)
 )
 
@@ -184,6 +186,8 @@ func New(ctx context.Context, c config.ObjectStorage) (ext_os.ObjectStorage, err
 		}
 
 		return &AzureBlobStorage{container: c.AzureBlobStorage.Container, path: c.AzureBlobStorage.Path, client: client}, nil
+	case c.JFrogArtifactory != nil:
+		return newJFrogArtifactory(ctx, c.JFrogArtifactory)
 	case c.FileSystemStorage != nil:
 		return &FileSystemStorage{path: c.FileSystemStorage.Path}, nil
 	default:

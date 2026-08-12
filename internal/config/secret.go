@@ -259,6 +259,16 @@ func (s *Secret) Typed(context.Context) (any, error) {
 
 		return &value, nil
 
+	case "jfrog_auth":
+		var value SecretJFrog
+		if err := decode(m, &value); err != nil {
+			return nil, err
+		} else if value.Username == "" || value.Password == "" {
+			return nil, errors.New("missing username or password in JFrog secret")
+		}
+
+		return &value, nil
+
 	default:
 		return nil, fmt.Errorf("unknown secret type %q", s.Value["type"])
 	}
@@ -493,6 +503,21 @@ func (s *SecretAPIKey) Client(context.Context) (*http.Client, error) {
 }
 
 var _ ClientSecret = (*SecretAPIKey)(nil)
+
+// SecretJFrog represents JFrog Artifactory authentication credentials.
+type SecretJFrog struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+func (s *SecretJFrog) Client(context.Context) (*http.Client, error) {
+	return wrappedClient(func(r *http.Request) *http.Request {
+		r.SetBasicAuth(s.Username, s.Password)
+		return r
+	}), nil
+}
+
+var _ ClientSecret = (*SecretJFrog)(nil)
 
 // we use this one so we don't need duplicate tags on every struct
 func decode(input any, output any) error {

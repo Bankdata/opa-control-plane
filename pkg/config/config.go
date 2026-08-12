@@ -359,6 +359,7 @@ type ObjectStorage struct {
 	AmazonS3          *AmazonS3          `json:"aws,omitempty"`
 	GCPCloudStorage   *GCPCloudStorage   `json:"gcp,omitempty"`
 	AzureBlobStorage  *AzureBlobStorage  `json:"azure,omitempty"`
+	JFrogArtifactory  *JFrogArtifactory  `json:"jfrog,omitempty"`
 	FileSystemStorage *FileSystemStorage `json:"filesystem,omitempty"`
 }
 
@@ -370,6 +371,9 @@ func (o *ObjectStorage) validate() error {
 		return err
 	}
 	if err := o.AzureBlobStorage.validate(); err != nil {
+		return err
+	}
+	if err := o.JFrogArtifactory.validate(); err != nil {
 		return err
 	}
 	return o.FileSystemStorage.validate()
@@ -455,6 +459,34 @@ func (a *AzureBlobStorage) validate() error {
 
 	if a.Path == "" {
 		return errors.New("azure blob storage path is required")
+	}
+
+	return nil
+}
+
+// JFrogArtifactory defines the configuration for JFrog Cloud Artifactory.
+type JFrogArtifactory struct {
+	URL         string     `json:"url"`
+	Repository  string     `json:"repository"`
+	Path        string     `json:"path"`
+	Credentials *SecretRef `json:"credentials,omitempty"`
+}
+
+func (j *JFrogArtifactory) validate() error {
+	if j == nil {
+		return nil
+	}
+
+	if j.URL == "" {
+		return errors.New("jfrog artifactory URL is required")
+	}
+
+	if j.Repository == "" {
+		return errors.New("jfrog artifactory repository is required")
+	}
+
+	if j.Path == "" {
+		return errors.New("jfrog artifactory path is required")
 	}
 
 	return nil

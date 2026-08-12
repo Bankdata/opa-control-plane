@@ -14,3 +14,4 @@ opactl_*
 /files
 /.go
 /dist
+.github/copilot-instructions.md

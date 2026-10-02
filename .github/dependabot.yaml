@@ -2,17 +2,16 @@ version: 2
 updates:
   - package-ecosystem: gomod
     directory: /
+    target-branch: bankdata/v0.7.0
     schedule:
       interval: weekly
+    labels:
+      - dependencies
+    commit-message:
+      prefix: "⬆️"
     groups:
-      all:
+      go-patch:
         patterns:
           - "*"
-  - package-ecosystem: github-actions
-    directory: /
-    schedule:
-      interval: monthly
-    groups:
-      gha-dependencies:
-        patterns:
-          - "*"
+        update-types:
+          - patch
